@@ -1,0 +1,107 @@
+#!/usr/bin/env bash
+
+LOG_LEVEL_ERROR="0"
+LOG_LEVEL_INFO="1"
+LOG_LEVEL_DEBUG="2"
+VERBOSE="${VERBOSE:-${LOG_LEVEL_INFO}}"
+
+function printError {
+    if (( "${VERBOSE}" >= "${LOG_LEVEL_ERROR}" )); then
+        >&2 echo "error: ${@}"
+    fi
+}
+
+function printInfo {
+    if (( "${VERBOSE}" >= "${LOG_LEVEL_INFO}" )); then
+        >&2 echo "info: ${@}"
+    fi
+}
+
+function printDebug {
+    if (( "${VERBOSE}" >= "${LOG_LEVEL_DEBUG}" )); then
+        >&2 echo "debug: ${@}"
+    fi
+}
+
+function exitWithError {
+    printError "${@}"
+    exit 1
+}
+
+# function realpath {
+#     echo "$(cd "$(dirname "$1")"; pwd -P)/$(basename "$1")"
+# }
+
+function printDisclaimer {
+    cat << EOF
+# This file is managed within ${CI_PROJECT_URL:-a git} repository.
+# Do not edit.
+#
+# See https://github.com/vbouchaud/haproxy-configuration-builder
+# for details about the supported operations for /etc/haproxy/haproxy.cfg
+
+EOF
+}
+
+declare -A registry=()
+function registerFile {
+    local filename="$(realpath "${1}")"
+
+    if [[ -d "${filename}" ]]; then
+        for subfile in ${filename}/*.cfg; do
+            if [[ -f "${subfile}" ]]; then
+                registerFile "${subfile}"
+            fi
+        done
+    elif [[ -f "${filename}" ]]; then
+        if [[ -z "${registry[${filename}]}" ]]; then
+            registry["${filename}"]="$(cat "${filename}")"
+
+            for file in $(grep -Po 'include\("\K.*?(?=")' "${filename}"); do
+                registerFile "$(dirname "${filename}")/${file}"
+            done
+        else
+            printInfo "file '${filename}' already registered"
+        fi
+    else
+        printError "file '${filename}' not found"
+    fi
+}
+
+function printFile {
+    local file="$(realpath "${1}")"
+    local spacer="${2}"
+
+    if [[ -d "${file}" ]]; then
+        for subfile in ${file}/*.cfg; do
+            if [[ -f "${subfile}" ]]; then
+                printFile "${subfile}" "${spacer}"
+            fi
+        done
+    else
+        echo "${spacer}## Source: $(realpath --relative-to="${PWD}" "${file}")"
+        while IFS= read -r line; do
+            local include="$(grep -Po 'include\("\K.*?(?=")' <<< "${line}")"
+            if [[ ! -z "${include}" ]]; then
+                local nsp="$(echo "${line}" | cut -d'i' -f1)"
+                local fullpathname="$(realpath "$(dirname "${file}")/${include}")"
+                printFile "${fullpathname}" "${nsp}"
+            else
+                echo "${spacer}${line}"
+            fi
+        done <<< "${registry[$file]}"
+        echo
+    fi
+}
+
+function main {
+    if [[ -z "${1}" ]] || [[ ! -f "${1}" ]]; then
+        exitWithError "no file '${filename}'"
+    fi
+
+    registerFile "${1}"
+    printDisclaimer
+    printFile "${1}" ""
+}
+
+main $*
