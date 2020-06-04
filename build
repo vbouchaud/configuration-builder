@@ -2,8 +2,7 @@
 
 LOG_LEVEL_ERROR="0"
 LOG_LEVEL_INFO="1"
-LOG_LEVEL_DEBUG="2"
-VERBOSE="${VERBOSE:-${LOG_LEVEL_INFO}}"
+VERBOSE="${VERBOSE:-${LOG_LEVEL_ERROR}}"
 
 function printError {
     if (( "${VERBOSE}" >= "${LOG_LEVEL_ERROR}" )); then
@@ -17,28 +16,13 @@ function printInfo {
     fi
 }
 
-function printDebug {
-    if (( "${VERBOSE}" >= "${LOG_LEVEL_DEBUG}" )); then
-        >&2 echo "debug: ${@}"
-    fi
-}
-
-function exitWithError {
-    printError "${@}"
-    exit 1
-}
-
-# function realpath {
-#     echo "$(cd "$(dirname "$1")"; pwd -P)/$(basename "$1")"
-# }
-
 function printDisclaimer {
     cat << EOF
 # This file is managed within ${CI_PROJECT_URL:-a git} repository.
 # Do not edit.
 #
-# See https://github.com/vbouchaud/haproxy-configuration-builder
-# for details about the supported operations for /etc/haproxy/haproxy.cfg
+# See https://github.com/vbouchaud/configuration-builder
+# for details about the supported operations.
 
 EOF
 }
@@ -83,24 +67,26 @@ function printFile {
         while IFS= read -r line; do
             local include="$(grep -Po 'include\("\K.*?(?=")' <<< "${line}")"
             if [[ ! -z "${include}" ]]; then
-                local nsp="$(echo "${line}" | cut -d'i' -f1)"
+                local nsp="${spacer}$(echo "${line}" | cut -d'i' -f1)"
                 local fullpathname="$(realpath "$(dirname "${file}")/${include}")"
                 printFile "${fullpathname}" "${nsp}"
             else
                 echo "${spacer}${line}"
             fi
         done <<< "${registry[$file]}"
-        echo
     fi
 }
 
 function main {
     if [[ -z "${1}" ]] || [[ ! -f "${1}" ]]; then
-        exitWithError "no file '${filename}'"
+        printError "no file '${filename}'"
+        exit 1
     fi
 
     registerFile "${1}"
-    printDisclaimer
+    if [[ ! -z "${PRINT_DISCLAIMER}" ]]; then
+        printDisclaimer
+    fi
     printFile "${1}" ""
 }
 
